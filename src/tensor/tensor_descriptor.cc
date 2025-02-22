@@ -8,6 +8,7 @@ __C __export infiniopStatus_t infiniopCreateTensorDescriptor(infiniopTensorDescr
     if (strides_) {
         std::memcpy(strides, strides_, ndim * sizeof(int64_t));
     } else {
+        // 计算在一维数组中根据索引确定位置时每个维度的偏移量
         int64_t dsize = 1;
         for (int i = ndim - 1; i >= 0; i--) {
             strides[i] = dsize;

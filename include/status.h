@@ -1,6 +1,15 @@
+/**
+ * @file status.h
+ * @brief 定义状态码相关的枚举值
+ * @author 上官永石
+ * @date 2025-02-21
+ */
 #ifndef INFINIOP_STATUS_H
 #define INFINIOP_STATUS_H
 
+/**
+ * @brief 操作的状态
+ */
 typedef enum {
     STATUS_SUCCESS = 0,
     STATUS_EXECUTION_FAILED = 1,

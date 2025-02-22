@@ -1,17 +1,25 @@
 #include "common_cpu.h"
 
 float f16_to_f32(uint16_t h) {
+    // 将保存在 uint16_t 中的浮点数通过转换保存到 uint32_t 中
+    // uint16_t 共 16 位，第 1 位是符号位，接下来 5 位是指数，剩下的 10 位是尾数
     uint32_t sign = (h & 0x8000) << 16; // Extract the sign bit
     int32_t exponent = (h >> 10) & 0x1F;// Extract the exponent
     uint32_t mantissa = h & 0x3FF;      // Extract the mantissa (fraction part)
 
+    // IEEE 754 标准中，第 1 位为符号位，之后 8 位是阶码，尾数占最后 23 位
+    // 阶码全 1，尾数全 0 的 float 表示无穷大、尾数非 0 的 float 为 NaN
+    // 阶码全 0，尾数全 0 的 float 表示机器 0、尾数非 0 的 float 表示非规格化数
     if (exponent == 31) {// Special case for Inf and NaN
+        // 如果指数位为31（即全 1），表示可能是无穷大或 NaN
         if (mantissa != 0) {
-            // NaN: Set float32 NaN
+            // NaN: Set float32 NaN. 尾数非 0，表示 NaN
+            // 将 16 位浮点数的后 10 位在 32 位浮点数的后 23 位中从前向后保存
             uint32_t f32 = sign | 0x7F800000 | (mantissa << 13);
             return *(float *) &f32;
         } else {
-            // Infinity
+            // Infinity，如果尾数为 0，为无穷大
+            // 与符号位按位或，是为了确定是正无穷还是负无穷
             uint32_t f32 = sign | 0x7F800000;
             return *(float *) &f32;
         }
@@ -28,11 +36,12 @@ float f16_to_f32(uint16_t h) {
                 exponent--;
             }
             mantissa &= 0x3FF;// Clear the leading 1 bit
+            // 阶码为移码，在 float16 中阶码为非移码，因此需要做转换
             uint32_t f32 = sign | ((exponent + 127) << 23) | (mantissa << 13);
             return *(float *) &f32;
         }
     } else {
-        // Normalized float16
+        // Normalized float16，-15 是为了删除后三位的值
         uint32_t f32 = sign | ((exponent + 127 - 15) << 23) | (mantissa << 13);
         return *(float *) &f32;
     }
@@ -63,6 +72,7 @@ uint16_t f32_to_f16(float val) {
     }
 }
 
+// 根据给定的一维索引 flat_index、维度数量 ndim、源步长数组 src_strides 和目标步长数组 dst_strides 来计算目标偏移量
 uint64_t getDstOffset(uint64_t flat_index, uint64_t ndim, int64_t const *src_strides, int64_t const *dst_strides) {
     uint64_t res = 0;
     for (uint64_t i = 0; i < ndim; ++i) {
@@ -72,6 +82,7 @@ uint64_t getDstOffset(uint64_t flat_index, uint64_t ndim, int64_t const *src_str
     return res;
 }
 
+// 根据给定的一维扁平索引 flat_index、维度数量 ndim、各维度的形状数组 shape 和步长数组 strides 来计算多维数组中对应元素在内存中的偏移量
 uint64_t getOffset(uint64_t flat_index, uint64_t ndim, uint64_t const *shape, int64_t const *strides) {
     uint64_t res = 0;
     for (long i = ndim - 1; i >= 0; --i) {
@@ -81,6 +92,7 @@ uint64_t getOffset(uint64_t flat_index, uint64_t ndim, uint64_t const *shape, in
     return res;
 }
 
+// 根据给定的维度数量 ndim、各维度的形状数组 shape 和步长数组 strides 来计算多维数组的总大小
 uint64_t getPaddedSize(uint64_t ndim, uint64_t *shape, uint64_t const *pads) {
     uint64_t total_size = 1;
     for (size_t i = 0; i < ndim; ++i) {
@@ -89,6 +101,7 @@ uint64_t getPaddedSize(uint64_t ndim, uint64_t *shape, uint64_t const *pads) {
     return total_size;
 }
 
+// 根据给定的维度数量 ndim、各维度的形状数组 shape 和步长数组 strides 来计算出填充后的形状
 void getPaddedShape(uint64_t ndim, uint64_t const *shape, uint64_t const *pads, uint64_t *padded_shape) {
     memcpy(padded_shape, shape, ndim * sizeof(uint64_t));
     for (size_t i = 2; i < ndim; ++i) {

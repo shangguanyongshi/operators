@@ -1,4 +1,10 @@
-﻿#ifndef __DEVICE_H__
+﻿/**
+ * @file device.h
+ * @brief 定义设备类型相关的枚举值
+ * @author 上官永石
+ * @date 2025-02-14
+ */
+#ifndef __DEVICE_H__
 #define __DEVICE_H__
 
 enum DeviceEnum {

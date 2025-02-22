@@ -11,9 +11,19 @@ constexpr static uint16_t mask_low(int bits) noexcept {
 }
 
 // convert half-precision float to single-precision float
+/**
+ * @brief 将 16 位浮点数转换为 32 位浮点数
+ * @param code 在 uint16_t 类型中保存的 16 位浮点数
+ * @return 转换后的 32 位浮点数保存为 float 类型
+ */
 float f16_to_f32(uint16_t code);
 
 // convert single-precision float to half-precision float
+/**
+ * @brief 将 32 位浮点数转换为 16 位浮点数
+ * @param val 32 位浮点数以 float 类型保存
+ * @return 转换后的 16 位浮点数保存在 uint16_t 类型中
+ */
 uint16_t f32_to_f16(float val);
 
 // get the corresponding offset in the destination given the flat index of the source (for element mapping in shape broadcast)

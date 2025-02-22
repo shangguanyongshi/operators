@@ -9,9 +9,19 @@ def check_error(status):
 
 
 def to_tensor(tensor, lib):
+    """将 Pytorch 的张量转换为 CTest 类型，其中要解析 Pytorch 张量的相关信息，
+    并使用这些信息创建 infiniopTensorDescriptor_t 类型的张量描述符
+
+    Args:
+        tensor: Pytorch 类型的张量
+        lib: infiniop 动态库对象
+
+    Returns:
+        liboperators.py 中定义的 CTest 类型，其中包含两个成员：\n
+            descriptor: infiniopTensorDescriptor_t 类型的张量描述符 \n
+            data: 指向张量实际数据的指针 \n
     """
-    Convert a PyTorch tensor to a library Tensor(descriptor, data).
-    """
+    
     import torch
 
     ndim = tensor.ndimension()
@@ -55,6 +65,16 @@ def create_workspace(size, torch_device):
     return torch.zeros(size=(size,), dtype=torch.uint8, device=torch_device)
 
 def create_handle(lib, device, id=0):
+    """创建 infiniop 句柄
+
+    Args:
+        lib: infiniop 动态库对象
+        device: infiniop 设备类型
+        id: 如果是 gpu 等设备，可能需要 id 指定到底用哪个 gpu
+
+    Returns:
+       返回创建的 infiniop 句柄
+    """
     handle = infiniopHandle_t()
     check_error(lib.infiniopCreateHandle(ctypes.byref(handle), device, id))
     return handle

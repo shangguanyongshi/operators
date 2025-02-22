@@ -4,12 +4,21 @@ local GREEN = '\27[0;32m'
 local YELLOW = '\27[1;33m'
 local NC = '\27[0m'  -- No Color
 
+-- 添加头文件的搜索路径
 add_includedirs("include")
 
+-- 借助 option 函数定义选项，之后可在命令行通过特定参数来启用或者禁用该选项
+-- 例如，执行 xmake f -v 时，会列出当前可选项
+-- 执行 xmake f -v -cpu=false 时，会禁用 CPU 选项
+
+-- 创建一个名为 CPU 的选项
 option("cpu")
+    -- 用户没有指定任何选项时，默认启用当前选项
     set_default(true)
+    -- 指定当执行 xmake f -v 时会列出当前可选项
     set_showmenu(true)
     set_description("Enable or disable cpu kernel")
+    -- 添加预处理器定义
     add_defines("ENABLE_CPU")
 option_end()
 
@@ -63,24 +72,34 @@ option("sugon-dcu")
     add_defines("ENABLE_NV_GPU")
 option_end()
 
+-- 检查当前构建模式是否为调试模式
 if is_mode("debug") then
+    -- 如果是调试模式，添加编译标志 -g 和 -O0。-g 用于生成调试信息，-O0 表示不进行优化，方便调试
     add_cxflags("-g -O0")
+    -- 定义一个预处理器宏 DEBUG_MODE，在代码中可以通过 #ifdef DEBUG_MODE 来判断是否处于调试模式
     add_defines("DEBUG_MODE")
 end
 
+-- 检查是否启用了 CPU 内核选项
 if has_config("cpu") then
 
     add_defines("ENABLE_CPU")
+    -- 创建一个名为 cpu 的目标
     target("cpu")
+        -- 定义目标安装时的操作，function end 之间的部分是函数体，这里是空函数
         on_install(function (target) end)
+        -- 目标类型设置为静态库
         set_kind("static")
-
+        -- 如果不是 Windows 平台，添加编译标志 -fPIC，用于生成位置无关代码
         if not is_plat("windows") then
             add_cxflags("-fPIC")
         end
 
         set_languages("cxx17")
+        -- cpu 时，编译对应 cpu 目录下的源文件
+        -- 与源文件同目录下的头文件不需要明确导入，因此 cpu 目录下的头文件没有明确加入头文件搜索路径
         add_files("src/devices/cpu/*.cc", "src/ops/*/cpu/*.cc")
+        -- 如果启用了 OpenMP 选项，添加编译标志 -fopenmp 和链接标志 -fopenmp，以支持 OpenMP 并行计算
         if has_config("omp") then
             add_cxflags("-fopenmp")
             add_ldflags("-fopenmp")
@@ -335,9 +354,12 @@ toolchain("sugon-dcu-linker")
 toolchain_end()
 
 target("infiniop")
+    -- 指定生成动态库
     set_kind("shared")
 
+    -- 将当前 infiniop 目标关联到对应类型的依赖目标上，以保证能获取到对应类型的相关编译参数
     if has_config("cpu") then
+        -- target会自动继承依赖目标中的配置和属性，不需要额外调用add_links, add_linkdirs和add_rpathdirs等接口去关联依赖目标了
         add_deps("cpu")
     end
     if has_config("nv-gpu") then
@@ -374,8 +396,21 @@ target("infiniop")
     add_files("src/devices/handle.cc")
     add_files("src/ops/*/operator.cc")
     add_files("src/tensor/*.cc")
-    after_build(function (target) print(YELLOW .. "You can install the libraries with \"xmake install\"" .. NC) end)
 
+    after_build(function (target) 
+        -- 输出添加的所有文件
+        -- local source_files = target:sourcefiles()
+        -- if source_files then
+        --     print("Added source files:")
+        --     for _, file in ipairs(source_files) do
+        --         print(file)
+        --     end
+        -- end
+        print(YELLOW .. "You can install the libraries with \"xmake install\"" .. NC) 
+    end)
+
+    -- 指定优先使用环境变量 INFINI_ROOT 指定的路径
+    -- 其次根据 HOMEPATH （win下）或 HOME 环境变量指定路径下的 ./infini 作为安装路径
     set_installdir(os.getenv("INFINI_ROOT") or (os.getenv(is_host("windows") and "HOMEPATH" or "HOME") .. "/.infini"))
     add_installfiles("include/(**/*.h)", {prefixdir = "include"})
     add_installfiles("include/*.h", {prefixdir = "include"})

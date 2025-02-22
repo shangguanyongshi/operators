@@ -1,4 +1,9 @@
 def get_args():
+    """获取命令行运行时的参数参数
+
+    Returns:
+        _type_: 返回所解析的参数值
+    """
     import argparse
 
     parser = argparse.ArgumentParser(description="Test Operator")
