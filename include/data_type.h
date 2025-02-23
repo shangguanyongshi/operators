@@ -14,9 +14,9 @@ typedef struct DataLayout {
     unsigned short
         packed : 8, 
         sign : 1, // 是否有符号
-        size : 7, // 数据类型的字节个数
-        mantissa : 8, // 尾数的位数
-        exponent : 8; // 阶数的位数
+        size : 7, // 一个该类型数据所占字节的总个数
+        mantissa : 8, // 尾数占总字节数中多少位
+        exponent : 8; // 阶数占总字节数中多少位
 
 #ifdef __cplusplus
     bool operator==(const DataLayout &other) const {

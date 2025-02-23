@@ -59,6 +59,12 @@ inline void assert_true(int expr, const char *msg, const char *file, int line) {
     } while (0)
 
 // check if two data layouts (types) are equal
+/**
+ * @brief 比较两个 DataLayout 是否相等
+ * @param a 第一个操作数
+ * @param b 第二个操作数
+ * @return 如果相等，返回 true，否则返回 false
+ */
 inline bool dtype_eq(DataLayout a, DataLayout b) {
     union TypePun {
         DataLayout layout;
@@ -71,8 +77,15 @@ inline bool dtype_eq(DataLayout a, DataLayout b) {
     return a_ == b_;
 }
 
+/**
+ * @brief 返回每个维度偏移量所占字节大小
+ * @param desc 张量的描述符
+ * @return 每个维度偏移量所占字节大小
+ */
 inline std::vector<int64_t> get_byte_strides(infiniopTensorDescriptor_t desc) {
+    // 获取单个元素的字节数
     int64_t dsize = desc->dt.size;
+    // 每个维度偏移量乘以每个元素所占字节数，就是该维度的偏移量所占字节数
     std::vector<int64_t> strides(desc->ndim);
     for (uint64_t i = 0; i < desc->ndim; i++) {
         strides[i] = dsize * desc->strides[i];
@@ -142,8 +155,15 @@ inline bool isValidBroadcastShape(infiniopTensorDescriptor_t a, infiniopTensorDe
     return isValidBroadcastShape(a, b, c, std::max(a->ndim, b->ndim));
 }
 
+/**
+ * @brief 返回给定格式的张量所占总字节数
+ * @param desc 张量的描述符
+ * @return 该张量所占的总字节数
+ */
 inline uint64_t get_byte_size(infiniopTensorDescriptor_t desc) {
+    // 获取张量中一个元素所占的字节数
     uint64_t dsize = desc->dt.size;
+    // 计算张量所占字节的总个数
     uint64_t size = 1;
     for (uint64_t i = 0; i < desc->ndim; i++) {
         size *= desc->shape[i];
