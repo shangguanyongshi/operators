@@ -200,6 +200,11 @@ inline bool is_contiguous(const infiniopTensorDescriptor_t &desc, uint64_t dim_s
     return true;
 }
 
+/**
+ * @brief 检查张量的 strides 是否合法
+ * @param desc 待检查的张量描述符
+ * @return 维度合法时返回 true，否则返回 false
+ */
 inline bool is_contiguous(const infiniopTensorDescriptor_t &desc) {
     if (desc->ndim == 0) {
         return true;

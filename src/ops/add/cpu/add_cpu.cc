@@ -52,7 +52,7 @@ infiniopStatus_t cpuCreateAddDescriptor(infiniopHandle_t,
         return STATUS_BAD_TENSOR_DTYPE;
     }
 
-    // 将 c 的各个维度相乘，得到 c 的元素数量
+    // 将 c 的各个维度相乘，得到 c 的元素数量（c shape 为空时，c_data_size 为 1，且通过变换，运算时 a 和 b 张量中都只有一个元素，计算结果也是正确的）
     uint64_t c_data_size = std::accumulate(c->shape, c->shape + c->ndim, 1ULL, std::multiplies<uint64_t>());
 
     // get the adjusted strides for a and b

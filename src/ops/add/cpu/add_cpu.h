@@ -27,7 +27,9 @@ typedef struct AddCpuDescriptor *AddCpuDescriptor_t;
 /**
  * @brief 创建一个用于对两个张量执行 CPU 加法操作的描述符
  * @param infiniopHandle_t 函数中未使用
- * @param desc_ptr 存储创建好的描述符
+ * @param desc_ptr 存储创建好的描述符，这里是一个 AddCpuDescriptor_t 类型的指针，存储一个地址，
+ *                 python 调用时，也只传入一个 AddCpuDescriptor_t 指针的指针进来，
+ *                 实际的内存管理由 C++ 代码完成
  * @param c 结果张量描述符
  * @param a 第一个操作数的张量描述符
  * @param b 第二个操作数的张量描述符
