@@ -95,6 +95,18 @@ inline std::vector<int64_t> get_byte_strides(infiniopTensorDescriptor_t desc) {
 }
 
 // calculate the broadcasted shape for two tensors
+/**
+ * @brief 计算两个张量的广播后的形状
+ * @param shape1 第一个张量的实际形状
+ * @param ndim1 第一个张量的实际维度数
+ * @param shape2 第二个张量的实际形状
+ * @param ndim2 第二个张量的实际维度数
+ * @param broadcast_shape 广播后的形状保存到该数组中
+ * @param padded_shape1 在第一个张量前面添加多个维度 1 达到 max_rank 阶后的形状
+ * @param padded_shape2 在第二个张量前面添加多个维度 1 达到 max_rank 阶后的形状
+ * @param max_rank 广播后的最大维度个数
+ * @return 如果广播成功，返回 true，否则返回 false
+ */
 inline bool getBroadcastShape(const uint64_t *shape1, uint64_t ndim1,
                               const uint64_t *shape2, uint64_t ndim2,
                               uint64_t *broadcast_shape, uint64_t *padded_shape1,
@@ -118,6 +130,7 @@ inline bool getBroadcastShape(const uint64_t *shape1, uint64_t ndim1,
 }
 
 // check if the shape of tensor c is valid after broadcasting tensors a and b and also get the broadcasted shapes
+// 检查张量 c 的形状是否有效，即是否可以通过广播张量 a 和 b 得到，且广播后的阶为 broadcast_ndim
 inline bool isValidBroadcastShape(infiniopTensorDescriptor_t a, infiniopTensorDescriptor_t b, infiniopTensorDescriptor_t c,
                                   uint64_t broadcast_ndim) {
     std::vector<uint64_t>
@@ -134,6 +147,7 @@ inline bool isValidBroadcastShape(infiniopTensorDescriptor_t a, infiniopTensorDe
 }
 
 // check if the shape of tensor src can be validly broadcasted to that of the tensor dst
+// 检查张量 src 的形状是否可以广播到张量 dst 的形状
 inline bool isValidBroadcastShape(infiniopTensorDescriptor_t dst, infiniopTensorDescriptor_t src) {
     if (dst->ndim < src->ndim) {
         return false;
@@ -151,6 +165,7 @@ inline bool isValidBroadcastShape(infiniopTensorDescriptor_t dst, infiniopTensor
 }
 
 // check if the shape of tensor c is valid after broadcasting tensors a and b
+// 检查张量 c 的形状是否有效，即是否可以通过广播张量 a 和 b 得到
 inline bool isValidBroadcastShape(infiniopTensorDescriptor_t a, infiniopTensorDescriptor_t b, infiniopTensorDescriptor_t c) {
     return isValidBroadcastShape(a, b, c, std::max(a->ndim, b->ndim));
 }
@@ -191,6 +206,7 @@ inline infiniopTensorDescriptor_t permute(infiniopTensorDescriptor_t desc, const
 }
 
 // check if the dimensions [dim_start, dim_end] of a tensor descriptor are contiguous
+// 检查张量的维度是否连续（判断张量的 strides 是否合法）
 inline bool is_contiguous(const infiniopTensorDescriptor_t &desc, uint64_t dim_start, uint64_t dim_end) {
     for (size_t i = dim_start + 1; i <= dim_end; i++) {
         if (desc->strides[i - 1] != static_cast<int64_t>(desc->shape[i]) * desc->strides[i]) {
@@ -213,6 +229,7 @@ inline bool is_contiguous(const infiniopTensorDescriptor_t &desc) {
 }
 
 // merge the dimensions [dim_start, dim_end] of a tensor descriptor
+// 将张量的维度 [dim_start, dim_end] 合并为一个维度
 inline infiniopTensorDescriptor_t dim_merge(infiniopTensorDescriptor_t desc, uint64_t dim_start, uint64_t dim_end) {
     uint64_t ndim = desc->ndim;
     if (dim_start > dim_end || dim_end >= ndim) {
@@ -249,7 +266,7 @@ inline infiniopTensorDescriptor_t dim_merge(infiniopTensorDescriptor_t desc, uin
 // split the dimension dim of a tensor descriptor into multiple dimensions
 inline infiniopTensorDescriptor_t dim_split(infiniopTensorDescriptor_t desc, uint64_t dim, const std::vector<uint64_t> &dims) {
     uint64_t ndim = desc->ndim;
-    if (desc->shape[dim] != std::accumulate(dims.begin(), dims.end(), (uint64_t)1, std::multiplies{})) {
+    if (desc->shape[dim] != std::accumulate(dims.begin(), dims.end(), (uint64_t)1, std::multiplies<uint64_t>{})) {
         return nullptr;
     }
     uint64_t new_ndim = ndim + dims.size() - 1;

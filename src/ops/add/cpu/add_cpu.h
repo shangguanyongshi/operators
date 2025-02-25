@@ -14,8 +14,8 @@ struct AddCpuDescriptor {
     uint64_t ndim;  // 结果张量的维度
     uint64_t c_data_size;  // 结果张量的元素数量
     uint64_t const *c_shape;  // 结果张量的形状
-    uint64_t const *a_strides;  // 第一个操作数的偏移量步长
-    uint64_t const *b_strides;  // 第二个操作数的偏移量步长
+    uint64_t const *a_strides;  // 第一个操作数的偏移量步长（遍历一维数组时确定元素在张量中的位置）
+    uint64_t const *b_strides;  // 第二个操作数的偏移量步长（遍历一维数组时确定元素在张量中的位置）
     uint64_t *c_indices;  // 结果张量的索引
 };
 
