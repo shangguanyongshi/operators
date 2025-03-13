@@ -3,6 +3,7 @@
 
 #include "export.h"
 #include "operators.h"
+#include <stdio.h>
 
 typedef struct ReduceDescriptor {
     Device device;
@@ -26,26 +27,16 @@ __C infiniopStatus_t infiniopCreateReduceDescriptor(infiniopHandle_t handle,
                                                     infiniopReduceDescriptor_t *desc_ptr,
                                                     infiniopTensorDescriptor_t reduced,
                                                     infiniopTensorDescriptor_t data,
-                                                    infiniopTensorDescriptor_t axes,
+                                                    const int64_t *axes,
+                                                    size_t axes_size,
                                                     int keepdims,
                                                     int noop_with_empty_axes,
                                                     int reduce_type);
 
-/**
- * @brief 进行 F16 类型的 ReduceMean 操作时，将数据频繁的从 F32 转到 F16 会丢失精度，需要额外的空间，
- *        将和表示为 F32 类型，最后再将结果转换为 F16 类型
- * @param desc infiniopReduceDescriptor 句柄
- * @param size 保存所分配空间的大小
- * @return 空间是否分配成功
- */
-__C infiniopStatus_t infiniopGetReduceWorkspaceSize(infiniopReduceDescriptor_t desc, uint64_t *size);
-
 __C infiniopStatus_t infiniopReduce(infiniopReduceDescriptor_t desc,
-                                    void *workspace,
-                                    uint64_t workspace_size,
                                     void *reduced,
                                     void const *data,
-                                    void const *axes,
+                                    int64_t const *axes,
                                     void *stream);
 
 __C infiniopStatus_t infiniopDestroyReduceDescriptor(infiniopReduceDescriptor_t desc);

@@ -36,44 +36,34 @@ infiniopStatus_t cpuCreateReduceDescriptor(infiniopHandle_t handle,
                                            ReduceCpuDescriptor_t *desc_ptr,
                                            infiniopTensorDescriptor_t reduced,
                                            infiniopTensorDescriptor_t data,
-                                           infiniopTensorDescriptor_t axes,
+                                           int64_t const *axes,
+                                           size_t axes_ndim,
                                            int keepdims,
                                            int noop_with_empty_axes,
                                            int reduce_type) {
-  
-    // 检查参数的合法性
-    // 1. 检查 axes 非空时应该为一个标量，且类型为 int64
-    if (axes != nullptr) {
-        if (axes->ndim != 0) {
-            return STATUS_BAD_TENSOR_SHAPE;
-        }
-        if (axes->dt != I64) {
-            return STATUS_BAD_TENSOR_DTYPE;
-        }
-    }
-    // 2. 检查 data 的类型和形状都正确
+    // 1. 检查 data 的类型和形状都正确
     if (data->dt != F16 && data->dt != F32) {
         return STATUS_BAD_TENSOR_DTYPE;
     }
     if (!is_contiguous(data)) {
         return STATUS_BAD_TENSOR_SHAPE;
     }
-    // 3. 检查 reduced 的类型和形状都正确
+    // 2. 检查 reduced 的类型和形状都正确
     if (reduced->dt != data->dt) {
         return STATUS_BAD_TENSOR_DTYPE;
     }
-    // 如果要保留维度，reduced 应该可以广播到 data
+    // 3. 如果要保留维度，reduced 应该可以广播到 data
     if (keepdims && !isValidBroadcastShape(data, reduced)) {
         return STATUS_BAD_TENSOR_SHAPE;
     }
-    // 如果不保留维度
+    // 4. 如果不保留维度
     if (keepdims == 0) {
         // 如果 axes 为空，noop_with_empty_axes 为 0，reduced 应该是个标量
         if (axes == nullptr && noop_with_empty_axes == 0 && reduced->ndim != 0) {
             return STATUS_BAD_TENSOR_SHAPE;
         }
-        // 如果 axes 非空，且 data 非标量时，reduced 应该比 data 少一个维度
-        if (axes != nullptr && reduced->ndim != 0 && reduced->ndim != data->ndim - 1) {
+        // 如果 axes 非空，且 data 非标量时，reduced 应该是 data 去掉 axes 指定的维度
+        if (axes != nullptr && data->ndim != 0 && reduced->ndim != data->ndim - axes_ndim) {
             return STATUS_BAD_TENSOR_SHAPE;
         }
     }
@@ -90,13 +80,76 @@ infiniopStatus_t cpuCreateReduceDescriptor(infiniopHandle_t handle,
     // 4. 初始化 data_indices
     uint64_t *data_indices = new uint64_t[data->ndim];
     std::fill(data_indices, data_indices + data->ndim, 0);
-    // 5. 初始化 reduced 的形状为全 0 （运行时传入的 axes 是否为空决定了 reduced 的实际维度，因此推迟到运行时计算）
+    // 5. 保存 axes
+    int64_t *axes_data = nullptr;
+    if (axes != nullptr) {
+        axes_data = new int64_t[axes_ndim];
+        std::copy(axes, axes + axes_ndim, axes_data);
+        // 将 axes_data 中的负数转换为正数
+        for (size_t i = 0; i < axes_ndim; ++i) {
+            if (axes_data[i] < -static_cast<int64_t>(data->ndim) ||
+                axes_data[i] >= static_cast<int64_t>(data->ndim)) {
+                return STATUS_BAD_PARAM;
+            } else if (axes_data[i] < 0) {
+                axes_data[i] += static_cast<int64_t>(data->ndim);
+            }
+        }
+        // 对 axes_data 排序，方便后续遍历
+        std::sort(axes_data, axes_data + axes_ndim);
+    }
+    // 6. 初始化 axes_indices 的索引
+    uint64_t *axes_indices = new uint64_t[axes_ndim];
+    std::fill(axes_indices, axes_indices + axes_ndim, 0);
+    // 7. 初始化 axes_shape (axes 中所指定维度的 shape) 和 axes_size
+    uint64_t *axes_shape = new uint64_t[axes_ndim];
+    for (size_t i = 0; i < axes_ndim; ++i) {
+        axes_shape[i] = data_shape[axes_data[i]];
+    }
+    u_int64_t axes_size =
+        std::accumulate(axes_shape, axes_shape + axes_ndim, uint64_t(1), std::multiplies<uint64_t>());
+    // 8. 初始化 reduced 的形状
     uint64_t *reduced_shape = new uint64_t[reduced->ndim];
-    std::fill(reduced_shape, reduced_shape + reduced->ndim, 0);
-    // 6. 初始时根据 reduced 的形状计算总元素个数
+    if (axes != nullptr && axes_ndim != 0) {
+        // axes 非空时，根据是否 keepdims 设置 reduced 的形状
+        if (keepdims == 0) {
+            // 不保留维度时，reduced 的形状是 data 去掉 axes 指定的维度
+            for (size_t i = 0, j = 0; i < data->ndim; ++i) {
+                if (i == axes_data[j]) {
+                    ++j;
+                    continue;
+                } else {
+                    reduced_shape[i - j] = data_shape[i];
+                }
+            }
+        } else {
+            // 保留维度时，reduced 中 axes 指定的维度为 1
+            for (size_t i = 0, j = 0; i < data->ndim; ++i) {
+                if (i == axes_data[j]) {
+                    reduced_shape[i] = 1;
+                    ++j;
+                } else {
+                    reduced_shape[i] = data_shape[i];
+                }
+            }
+        }
+    } else {
+        // axes 为空时，reduced 的形状根据 noop_with_empty_axes 设置
+        if (noop_with_empty_axes == 1) {
+            // noop_with_empty_axes 为 1，reduced 与 data 相同
+            std::copy(data_shape, data_shape + data->ndim, reduced_shape);
+        } else {
+            // noop_with_empty_axes 为 0，表示对所有维度进行操作
+            if (keepdims == 1) {
+                // 保留维度时，reduced 每个维度都为 1
+                std::fill(reduced_shape, reduced_shape + reduced->ndim, 1);
+            }
+            // 不保留维度时，reduced 为标量，其 shape 的形状为 0
+        }
+    }
+    // 9. 初始时根据 reduced 的形状计算总元素个数
     uint64_t reduced_size =
         std::accumulate(reduced->shape, reduced->shape + reduced->ndim, uint64_t(1), std::multiplies<uint64_t>());
-    // 7. 初始化 reduced_indices
+    // 10. 初始化 reduced_indices
     uint64_t *reduced_indices = new uint64_t[reduced->ndim];
     std::fill(reduced_indices, reduced_indices + reduced->ndim, 0);
 
@@ -109,6 +162,11 @@ infiniopStatus_t cpuCreateReduceDescriptor(infiniopHandle_t handle,
         data_shape,
         data_strides,
         data_indices,
+        axes_data,
+        axes_indices,
+        axes_shape,
+        axes_size,
+        axes_ndim,
         reduced->ndim,
         reduced_size,
         reduced_shape,
@@ -120,31 +178,18 @@ infiniopStatus_t cpuCreateReduceDescriptor(infiniopHandle_t handle,
     return STATUS_SUCCESS;
 }
 
-infiniopStatus_t cpuGetReduceWorkspaceSize(ReduceCpuDescriptor_t desc, uint64_t *size) {
-    // 执行 mean 运算，且数据类型为 F16 时，使用额外的 float 类型的内存空间，避免 F32 转换为 F16 导致精度下降
-    if (desc->reduce_type == 3 && desc->dtype == F16) {
-        // std::cout << desc->reduced_size << std::endl;
-        *size = desc->reduced_size * sizeof(float);
-    }
-    return STATUS_SUCCESS;
-}
-
 template<typename Tdata>
 infiniopStatus_t reduce_cpu(ReduceCpuDescriptor_t desc,
-                            void *workspace,
-                            uint64_t workspace_size,
                             void *reduced,
                             void const *data,
-                            void const *axes,
+                            int64_t const *axes,
                             void *stream) {
-    
     // 1. 先将输入转换为对应类型的数据
     auto reduced_data = reinterpret_cast<Tdata *>(reduced);
-    // 当执行 mean 且 reduced_data 的类型为 F16 时，累加相处的计算过程使用 workspace_data，每个维度的结果直接保存到 reduced_data 中
-    auto workspace_data = reinterpret_cast<float *>(workspace);
     auto data_data = reinterpret_cast<Tdata const *>(data);
-    auto axes_data = reinterpret_cast<int64_t const *>(axes);
+    int64_t const *axes_data = desc->axes;
 
+    // 2. 判断输入数据是否为空或标量
     if (desc->data_size == 1) {
         // 如果只有一个元素，表示是一个标量，直接复制返回
         reduced_data[0] = data_data[0];
@@ -177,156 +222,147 @@ infiniopStatus_t reduce_cpu(ReduceCpuDescriptor_t desc,
         return STATUS_SUCCESS;
     }
 
-    // 2. 计算所操作的维度
-    int64_t op_axes = -1; // 记录实际操作的正数维度，默认 -1 表示对所有维度进行操作
-    if (axes_data == nullptr) {
-        if (desc->noop_with_empty_axes != 0) {
-            // 如果 noop_with_empty_axes 为 true，则将 data 直接复制到 reduced 中后返回
-            std::copy(data_data, data_data + desc->data_size, reduced_data);
-            return STATUS_SUCCESS;
-        }
-        // 如果 noop_with_empty_axes 为 false，op_axes = -1，对所有维度进行操作
-    } else {
-        // 判断指定的维度是否在 data 阶数范围内 [-data.ndim, data.ndim - 1]
-        if ((*axes_data) < -static_cast<int64_t>(desc->data_ndim) ||
-            (*axes_data) >= static_cast<int64_t>(desc->data_ndim)) {
-            return STATUS_BAD_PARAM;
-        }
-        // 将指定的维度转换为正数
-        op_axes = (*axes_data) < 0 ? (*axes_data) + static_cast<int64_t>(desc->data_ndim) : (*axes_data);
+    // 3. 判断是否返回原有数据
+    if (axes_data == nullptr && desc->noop_with_empty_axes == 1) {
+        // 如果 axes_data 为空且 noop_with_empty_axes 为 true，则将 data 直接复制到 reduced 中后返回
+        std::copy(data_data, data_data + desc->data_size, reduced_data);
+        return STATUS_SUCCESS;
     }
-
-    // 3. 计算输出张量的信息，只有对指定维度操作时才需要计算 reduced 的形状和大小
-    if (op_axes != -1) {
-        desc->reduced_size = 1; // 先设置为 0，在下面通过累乘得到最终值
-        if (desc->keepdims == 0) {
-            // 不保留维度时，reduced 的维度比 data 少 1
-            desc->reduced_ndim = desc->data_ndim - 1;
-            // reduced 的形状中 op_axes 对应的维度被删除
-            for (uint64_t i = 0, j = 0; i < desc->data_ndim; ++i) {
-                if (i != op_axes) {
-                    desc->reduced_shape[j++] = desc->data_shape[i];
-                    desc->reduced_size *= desc->data_shape[i];
-                }
-            }
-        } else {
-            // 保留维度时，reduced 的维度和 data 相同
-            desc->reduced_ndim = desc->data_ndim;
-            // reduced 的形状中 op_axes 对应的维度被设置为 1
-            for (uint64_t i = 0; i < desc->data_ndim; ++i) {
-                if (i == op_axes) {
-                    desc->reduced_shape[i] = 1;
+    
+    //4. 判断是否是对所有维度执行操作
+    bool is_reduce_all = false;
+    if (axes_data == nullptr && desc->noop_with_empty_axes == 0) {
+        // axes 为空且 noop_with_empty_axes 为 0 时，表示对所有维度进行操作
+        is_reduce_all = true;
+    } else if (desc->axes_ndim == desc->data_ndim) {
+        // 如果 axes_data 的大小等于 data_ndim，则表示对所有维度执行操作
+        is_reduce_all = true;
+    }
+    // 如果是对所有维度进行操作，直接遍历 data 的每个元素，计算后保存到 reduced_data[0] 中，直接返回
+    if (is_reduce_all) {
+        float res;
+        for (size_t i = 0; i < desc->data_size; ++i) {
+            if constexpr (std::is_same<Tdata, uint16_t>::value) {
+                if (i == 0) {
+                    res = f16_to_f32(data_data[i]);
                     continue;
                 }
-                desc->reduced_shape[i] = desc->data_shape[i];
-                desc->reduced_size *= desc->data_shape[i];
-            }
-        }
-    }
-
-    // 4. 如果是对所有维度进行操作，直接遍历 data 的每个元素，计算后保存到 reduced_data[0] 中，直接返回
-    if (op_axes == -1) {
-        // 预保存第一个元素，避免 reduced_data 或 workspace_data 的原有值对结果造成影响
-        if (desc->reduce_type == 3 && desc->dtype == F16) {
-            workspace_data[0] = f16_to_f32(data_data[0]);
-        } else {
-            reduced_data[0] = data_data[0];
-        }
-        for (uint64_t i = 1; i < desc->data_size; ++i) {
-            // 根据 reduce_type 选择不同的操作
-            if (desc->reduce_type == 1) {
-                // 最大值
-                if constexpr (std::is_same<Tdata, uint16_t>::value) {
-                    reduced_data[0] = f32_to_f16(std::max(f16_to_f32(reduced_data[0]), f16_to_f32(data_data[i])));
-                } else {
-                    reduced_data[0] = std::max(reduced_data[0], data_data[i]);
+                if (desc->reduce_type == 1) { // 最大值
+                    res = std::max(res, f16_to_f32(data_data[i]));
+                } else if (desc->reduce_type == 2) { // 最小值
+                    res = std::min(res, f16_to_f32(data_data[i]));
+                } else if (desc->reduce_type == 3) { // 平均值
+                    res += f16_to_f32(data_data[i]);
                 }
-            } else if (desc->reduce_type == 2) {
-                // 最小值
-                if constexpr (std::is_same<Tdata, uint16_t>::value) {
-                    reduced_data[0] = f32_to_f16(std::min(f16_to_f32(reduced_data[0]), f16_to_f32(data_data[i])));
-                } else {
-                    reduced_data[0] = std::min(reduced_data[0], data_data[i]);
-                }
-            } else if (desc->reduce_type == 3) {
-                // 平均值
-                if constexpr (std::is_same<Tdata, uint16_t>::value) {
-                    workspace_data[0] = workspace_data[0] + f16_to_f32(data_data[i]);
-                } else {
-                    reduced_data[0] = reduced_data[0] + data_data[i];
-                }
-            }
-        }
-        // 如果是平均值，需要除以元素个数
-        if (desc->reduce_type == 3) {
-            if constexpr (std::is_same<Tdata, uint16_t>::value) {
-                // 将结果转换为 F16 保存到 reduced_data 中
-                reduced_data[0] = f32_to_f16(workspace_data[0] / desc->data_size);
             } else {
-                reduced_data[0] = reduced_data[0] / desc->data_size;
+                if (i == 0) {
+                    res = data_data[i];
+                    continue;
+                }
+                if (desc->reduce_type == 1) { // 最大值
+                    res = std::max(res, data_data[i]);
+                } else if (desc->reduce_type == 2) { // 最小值
+                    res = std::min(res, data_data[i]);
+                } else if (desc->reduce_type == 3) { // 平均值
+                    res += data_data[i];
+                }
+            }
+        }
+        if constexpr (std::is_same<Tdata, uint16_t>::value) {
+            if (desc->reduce_type == 3) { // 平均值
+                res /= desc->data_size;
+                reduced_data[0] = f32_to_f16(res);
+            } else {
+                reduced_data[0] = f32_to_f16(res);
+            }
+        } else {
+            if (desc->reduce_type == 3) { // 平均值
+                res /= desc->data_size;
+                reduced_data[0] = res;
+            } else {
+                reduced_data[0] = res;
             }
         }
         return STATUS_SUCCESS;
     }
     
     // 5. 对指定的维度进行操作，遍历 reduced_data 的每个索引，根据索引，从 data_data 中获取对应元素
-    const auto &indices = desc->reduced_indices;
+    const auto &reduced_indices = desc->reduced_indices;
     const auto &data_indices = desc->data_indices;
-    for (uint64_t i = 0; i < desc->reduced_size; ++i, incrementOne(indices, desc->reduced_shape, desc->reduced_ndim)) {
-        // 从 indices 获取对应的 data_indices 索引
-        std::copy(indices, indices + desc->reduced_ndim, data_indices);
+    for (size_t i = 0; i < desc->reduced_size;
+         ++i, incrementOne(reduced_indices, desc->reduced_shape, desc->reduced_ndim)) {
+        
+        // 先将 reduced_indices 的非 reduce 索引保存到 data_indices 中
         if (desc->keepdims == 0) {
-            // 如果不保留维度，indices 不包含第 op_axes 维度，需要将 op_axes 对应的维度插入
-            for (uint64_t j = desc->data_ndim - 1; j > op_axes; --j) {
-                data_indices[j] = data_indices[j - 1];
+            // 不保存 reduce 的维度时，reduced_indices 是所有不在 axes 中的索引
+            for (size_t j = 0, k = 0, l = 0; j < desc->data_ndim; ++j) {
+                // l 遍历 axes_data，k 遍历 reduced_indices
+                if (l < desc->axes_ndim && j == axes_data[l]) {
+                    ++l;
+                } else {
+                    data_indices[j] = reduced_indices[k++];
+                }
             }
-            data_indices[op_axes] = 0;
-        }
-
-        // 遍历 data 的 op_axes 维度的所有元素，计算结果保存到 reduced 的 indices 位置
-        // 先将 reduced_data[i] 的值设置为当前维度的第一个元素
-        data_indices[op_axes] = 0;
-        if (desc->reduce_type == 3 && desc->dtype == F16) {
-            workspace_data[i] = f16_to_f32(data_data[compactToFlat(data_indices, desc->data_strides, desc->data_ndim)]);
         } else {
-            reduced_data[i] = data_data[compactToFlat(data_indices, desc->data_strides, desc->data_ndim)];
+            // 保留维度时，reduced_indices 是所有维度的索引，可以直接复制
+            std::copy(reduced_indices, reduced_indices + desc->reduced_ndim, data_indices);
         }
 
-        // 遍历当前维度的剩余元素
-        for (uint64_t j = 1; j < desc->data_shape[op_axes]; ++j) {
-            data_indices[op_axes] = j;
-            // 获取在 data 中的索引
-            auto data_index = compactToFlat(data_indices, desc->data_strides, desc->data_ndim);
-            // 根据 reduce_type 选择不同的操作
-            if (desc->reduce_type == 1) {
-                // 最大值
+        // 遍历 axes 中指定的所有维度，与 reduced_indices 组合，构成 data_indices
+        float res;
+        const auto &axes_indices = desc->axes_indices;
+        for (size_t j = 0; j < desc->axes_size;
+             ++j, incrementOne(axes_indices, desc->axes_shape, desc->axes_ndim)) {
+            // 将 axes_indices 的索引保存到 axes 指定的 data_indices 对应的索引中
+            for (size_t k = 0; k < desc->axes_ndim; ++k) {
+                data_indices[desc->axes[k]] = axes_indices[k];
+            }
+            // 根据 data_indices 计算 data_data 的索引
+            size_t data_index = compactToFlat(data_indices, desc->data_strides, desc->data_ndim);
+
+            if (j == 0) {
+                // 如果是第一个元素，直接赋值给 res
                 if constexpr (std::is_same<Tdata, uint16_t>::value) {
-                    reduced_data[i] = f32_to_f16(std::max(f16_to_f32(reduced_data[i]), f16_to_f32(data_data[data_index])));
+                    res = f16_to_f32(data_data[data_index]);
                 } else {
-                    reduced_data[i] = std::max(reduced_data[i], data_data[data_index]);
+                    res = data_data[data_index];
                 }
-            } else if (desc->reduce_type == 2) {
-                // 最小值
-                if constexpr (std::is_same<Tdata, uint16_t>::value) {
-                    reduced_data[i] = f32_to_f16(std::min(f16_to_f32(reduced_data[i]), f16_to_f32(data_data[data_index])));
-                } else {
-                    reduced_data[i] = std::min(reduced_data[i], data_data[data_index]);
+                continue;
+            }
+
+            // 根据 reduce_type 计算 res
+            if constexpr (std::is_same<Tdata, uint16_t>::value) {
+                if (desc->reduce_type == 1) { // 最大值
+                    res = std::max(res, f16_to_f32(data_data[data_index]));
+                } else if (desc->reduce_type == 2) { // 最小值
+                    res = std::min(res, f16_to_f32(data_data[data_index]));
+                } else if (desc->reduce_type == 3) { // 平均值
+                    res += f16_to_f32(data_data[data_index]);
                 }
-            } else if (desc->reduce_type == 3) {
-                // 平均值
-                if constexpr (std::is_same<Tdata, uint16_t>::value) {
-                    workspace_data[i] = workspace_data[i] + f16_to_f32(data_data[data_index]);
-                } else {
-                    reduced_data[i] = reduced_data[i] + data_data[data_index];
+            } else {
+                if (desc->reduce_type == 1) { // 最大值
+                    res = std::max(res, data_data[data_index]);
+                } else if (desc->reduce_type == 2) { // 最小值
+                    res = std::min(res, data_data[data_index]);
+                } else if (desc->reduce_type == 3) { // 平均值
+                    res += data_data[data_index];
                 }
             }
         }
-        if (desc->reduce_type == 3) {
-            // 如果是平均值，需要除以元素个数
-            if constexpr (std::is_same<Tdata, uint16_t>::value) {
-                reduced_data[i] = f32_to_f16(workspace_data[i] / desc->data_shape[op_axes]);
+        // 将 res 保存到 reduced_data 中
+        if constexpr (std::is_same<Tdata, uint16_t>::value) {
+            if (desc->reduce_type == 3) { // 平均值
+                res /= desc->axes_size;
+                reduced_data[i] = f32_to_f16(res);
             } else {
-                reduced_data[i] = reduced_data[i] / desc->data_shape[op_axes];
+                reduced_data[i] = f32_to_f16(res);
+            }
+        } else {
+            if (desc->reduce_type == 3) { // 平均值
+                res /= desc->axes_size;
+                reduced_data[i] = res;
+            } else {
+                reduced_data[i] = res;
             }
         }
     }
@@ -335,18 +371,16 @@ infiniopStatus_t reduce_cpu(ReduceCpuDescriptor_t desc,
 }
 
 infiniopStatus_t cpuReduce(ReduceCpuDescriptor_t desc,
-                           void *workspace,
-                           uint64_t workspace_size,
                            void *reduced,
                            void const *data,
-                           void const *axes,
+                           int64_t const *axes,
                            void *stream) {
     
       if (desc->dtype == F16) {
-          return reduce_cpu<uint16_t>(desc, workspace, workspace_size, reduced, data, axes, stream);
+          return reduce_cpu<uint16_t>(desc, reduced, data, axes, stream);
       }
       if (desc->dtype == F32) {
-          return reduce_cpu<float>(desc, workspace, workspace_size, reduced, data, axes, stream);
+          return reduce_cpu<float>(desc, reduced, data, axes, stream);
       }
       return STATUS_BAD_TENSOR_DTYPE;
 }
@@ -356,8 +390,10 @@ infiniopStatus_t cpuDestroyReduceDescriptor(ReduceCpuDescriptor_t desc) {
     delete[] desc->data_shape;
     delete[] desc->data_strides;
     delete[] desc->data_indices;
+    delete[] desc->axes_shape;
+    delete[] desc->axes;
+    delete[] desc->axes_indices;
     delete[] desc->reduced_shape;
     delete[] desc->reduced_indices;
-
     return STATUS_SUCCESS;
 }

@@ -11,7 +11,8 @@ __C infiniopStatus_t infiniopCreateReduceDescriptor(
     infiniopReduceDescriptor_t *desc_ptr,
     infiniopTensorDescriptor_t reduced,
     infiniopTensorDescriptor_t data,
-    infiniopTensorDescriptor_t axes,
+    const int64_t *axes,
+    size_t axes_size,
     int keepdims,
     int noop_with_empty_axes,
     int reduce_type) {
@@ -24,6 +25,7 @@ __C infiniopStatus_t infiniopCreateReduceDescriptor(
                                          reduced,
                                          data,
                                          axes,
+                                         axes_size,
                                          keepdims,
                                          noop_with_empty_axes,
                                          reduce_type);
@@ -32,29 +34,16 @@ __C infiniopStatus_t infiniopCreateReduceDescriptor(
     return STATUS_BAD_DEVICE;
 }
 
-__C infiniopStatus_t infiniopGetReduceWorkspaceSize(infiniopReduceDescriptor_t desc, uint64_t *size) {
-    switch (desc->device) {
-#ifdef ENABLE_CPU
-    case DevCpu:
-        return cpuGetReduceWorkspaceSize((ReduceCpuDescriptor_t)desc, size);
-#endif
-    }
-    return STATUS_BAD_DEVICE;
-}
-
 __C infiniopStatus_t infiniopReduce(
     infiniopReduceDescriptor_t desc,
-    void *workspace,
-    uint64_t workspace_size,
     void *reduced,
     void const *data,
-    void const *axes,
+    int64_t const *axes,
     void *stream) {
-
     switch (desc->device) {
 #ifdef ENABLE_CPU
     case DevCpu:
-        return cpuReduce((ReduceCpuDescriptor_t)desc, workspace, workspace_size, reduced, data, axes, stream);
+        return cpuReduce((ReduceCpuDescriptor_t)desc, reduced, data, axes, stream);
 #endif
     }
     return STATUS_BAD_DEVICE;

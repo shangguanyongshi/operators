@@ -14,7 +14,7 @@
 /**
  * @brief 根据给定的参数，创建表示张量的描述符
  * @param desc_ptr 保存所创建的张量描述符
- * @param ndim 所标识张量的阶
+ * @param ndim 所表示张量的阶
  * @param shape_ 张量的形状
  * @param strides_ 张量的步长
  * @param datatype 张量元素的类型
