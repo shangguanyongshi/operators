@@ -169,4 +169,6 @@ if __name__ == "__main__":
     ]
     if args.cpu:
         test_cpu(lib, test_cases)
+    if not (args.cpu):
+        test_cpu(lib, test_cases)
     print("\033[92mTest passed!\033[0m")
